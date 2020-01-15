@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Runtime.InteropServices;
 using CoreSploit.Generic;
+using CoreSploit.Execution;
 
 namespace CoreSploit.Enumeration
 {
@@ -347,7 +348,6 @@ namespace CoreSploit.Enumeration
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                /**
                 foreach (string ComputerName in ComputerNames)
                 {
                     int QueryLevel = 1;
@@ -355,7 +355,7 @@ namespace CoreSploit.Enumeration
                     int EntriesRead = 0;
                     int TotalRead = 0;
                     int ResumeHandle = 0;
-                    int Result = PInvoke.Win32.Netapi32.NetLocalGroupEnum(ComputerName, QueryLevel, out PtrInfo, -1, out EntriesRead, out TotalRead, ref ResumeHandle);
+                    int Result = Win32.Netapi32.NetLocalGroupEnum(ComputerName, QueryLevel, out PtrInfo, -1, out EntriesRead, out TotalRead, ref ResumeHandle);
                     long Offset = PtrInfo.ToInt64();
                     if (Result == 0 && Offset > 0)
                     {
@@ -375,7 +375,7 @@ namespace CoreSploit.Enumeration
                                 }
                             );
                         }
-                        PInvoke.Win32.Netapi32.NetApiBufferFree(PtrInfo);
+                        Win32.Netapi32.NetApiBufferFree(PtrInfo);
                     }
                     else
                     {
@@ -383,7 +383,6 @@ namespace CoreSploit.Enumeration
                     }
                 }
                 return localGroups;
-                **/
             }
              return new List<LocalGroup>();
             

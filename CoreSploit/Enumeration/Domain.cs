@@ -613,7 +613,6 @@ namespace CoreSploit.Enumeration
             //public SecurityIdentifier Group { get; set; }
             //public RawAcl DiscretionaryAcl { get; set; }
             //public RawAcl SystemAcl { get; set; }
-
             public string admincount { get; set; }
             public string serviceprincipalname { get; set; }
             public string name { get; set; }
@@ -621,17 +620,14 @@ namespace CoreSploit.Enumeration
             public string memberof { get; set; }
             public string logoncount { get; set; }
             public UACEnum useraccountcontrol { get; set; }
-
             public string badpwdcount { get; set; }
             public DateTime badpasswordtime { get; set; }
             public DateTime pwdlastset { get; set; }
             public string whencreated { get; set; }
             public string whenchanged { get; set; }
             public DateTime accountexpires { get; set; }
-
             public DateTime lastlogon { get; set; }
             public DateTime lastlogoff { get; set; }
-
             public string codepage { get; set; }
             public string objectcategory { get; set; }
             public string usnchanged { get; set; }
