@@ -1,174 +1,240 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Text;
 using System.Linq;
-using System.Runtime.CompilerServices;
+using System.DirectoryServices;
+using System.Security.Principal;
+using System.Security.AccessControl;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using Novell.Directory.Ldap;
-using Novell.Directory.Ldap.Events;
+using System.Collections.Generic;
 
 namespace CoreSploit.Enumeration
 {
+    /// <summary>
+    /// Domain is a library for domain enumeration that can be used to search for and query for information from
+    /// DomainObjects such as users, groups, and computers.
+    /// </summary>
+    /// <remarks>
+    /// Domain is adapted from Will Schroeder's (@harmj0y) PowerView (Found
+    /// at https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1)
+    /// </remarks>
     public class Domain
     {
-        public class DomainSearcher : IDisposable
+        /// <summary>
+        /// DomainSearcher is a LDAP searcher class for domain enumeration.
+        /// </summary>
+        /// <remarks>
+        /// DomainSearcher is adapted from Will Schroeder's (@harmj0y) PowerView. (Found
+        /// at https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1)
+        /// </remarks>
+        public class DomainSearcher
         {
-            public string Domain { get; set; }
-            public string Server { get; set; }
-            public string SearchBase { get; set; }
-            public LdapConnection Searcher { get; set; }
+            public Credential Credentials { get; set; } = null;
+            private string Domain { get; set; }
+            private string Server { get; set; }
+            private DirectorySearcher DirectorySearcher { get; set; }
 
-            public DomainSearcher(string username = "", string password = "", string Domain = "", string Server = "",
-                string SearchBase = "", string SearchString = "",
-                int ResultPageSize = 200, TimeSpan ServerTimeLimit = default(TimeSpan), bool TombStone = false,
-                bool ssl = false)
+            /// <summary>
+            /// Constructor for the DomainSearcher class.
+            /// </summary>
+            /// <param name="Credentials">Optional alternative Credentials to authenticate to the Domain.</param>
+            /// <param name="Domain">Optional alternative Domain to authenticate to and search.</param>
+            /// <param name="Server">Optional alternative Server within the Domain to authenticate to and search.</param>
+            /// <param name="SearchBase">Optional SearchBase to prepend to all LDAP searches.</param>
+            /// <param name="SearchString">Optional SearchString to append to SearchBase for all LDAP searches.</param>
+            /// <param name="SearchScope">Optional SearchScope for the underlying DirectorySearcher object.</param>
+            /// <param name="ResultPageSize">Optional ResultPageSize for the underlying DirectorySearcher object.</param>
+            /// <param name="ServerTimeLimit">Optional max time limit for the server per search.</param>
+            /// <param name="TombStone">Optionally retrieve deleted/tombstoned DomainObjects</param>
+            /// <param name="SecurityMasks">Optional SecurityMasks for the underlying DirectorySearcher object.</param>
+            public DomainSearcher(Credential Credentials = null, string Domain = "", string Server = "", string SearchBase = "", string SearchString = "", SearchScope SearchScope = SearchScope.Subtree,
+                int ResultPageSize = 200, TimeSpan ServerTimeLimit = default(TimeSpan), bool TombStone = false, SecurityMasks SecurityMasks = SecurityMasks.None)
             {
+                this.Credentials = Credentials;
+                if (this.Credentials == null)
+                {
+                    this.Credentials = Credential.EmptyCredential;
+                }
                 this.Domain = Domain;
-                this.Server = Server;
-                this.SearchBase = SearchBase;
-                this.Searcher = new LdapConnection();
                 if (this.Domain == "")
                 {
                     this.Domain = Environment.UserDomainName;
                 }
-
+                this.Server = Server;
                 if (this.Server == "")
                 {
-                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                    {
-                        string logonserver = Environment.GetEnvironmentVariable(("logonserver"));
-                        this.Server = logonserver.Replace("\\", "");
-                    }
-                    else
-                    {
-                        //Attempt to get userdomain from environmental variable linux.
-                        this.Server = Environment.GetEnvironmentVariable("userdomain");
-                    }
-
+                    string logonserver = Environment.GetEnvironmentVariable("logonserver");
+                    this.Server = logonserver.Replace("\\", "") + this.Domain;
                 }
-
                 if (SearchBase == "")
                 {
-                    //this.SearchBase = "LDAP://" + this.GetBaseDN();
-                    this.SearchBase = this.GetBaseDN();
+                    SearchBase = "LDAP://" + this.GetBaseDN();
                 }
-
-                if (ssl)
+                DirectorySearcher searcher = null;
+                if (this.Credentials != null && this.Credentials != Credential.EmptyCredential)
                 {
-                    this.Searcher.SecureSocketLayer = true;
+                    DirectoryEntry searchRoot = new DirectoryEntry(SearchBase + SearchString, Credentials.UserName, Credentials.Password);
+                    searcher = new DirectorySearcher(searchRoot);
                 }
                 else
                 {
-                    this.Searcher.SecureSocketLayer = false;
+                    searcher = new DirectorySearcher(SearchBase + SearchString);
                 }
 
-                LdapSearchConstraints cons = this.Searcher.SearchConstraints;
-                cons.ReferralFollowing = true;
-                this.Searcher.Constraints = cons;
-                this.Searcher.Connect(this.Server, 389);
-                this.Searcher.Bind(username, password);
+                searcher.SearchScope = SearchScope;
+                searcher.PageSize = ResultPageSize;
+                searcher.CacheResults = false;
+                searcher.ReferralChasing = ReferralChasingOption.All;
+                if (ServerTimeLimit != default(TimeSpan))
+                {
+                    searcher.ServerTimeLimit = ServerTimeLimit;
+                }
+                searcher.Tombstone = TombStone;
+                searcher.SecurityMasks = SecurityMasks;
+                this.DirectorySearcher = searcher;
             }
 
-            public DomainObject GetDomainUser(string Identity, string LDAPFilter = "",
-                IEnumerable<string> Properties = null, bool SPN = false, bool AllowDelegation = false,
-                bool DisallowDelegation = false, bool AdminCount = false, bool TrustedToAuth = false,
-                bool PreauthNotRequired = false, int SearchScope = LdapConnection.SCOPE_SUB,
-                IEnumerable<UACEnum> UACFilter = null)
+            /// <summary>
+            /// Gets a specified user `DomainObject` in the current Domain.
+            /// </summary>
+            /// <param name="Identity">Username to search for.</param>
+            /// <param name="LDAPFilter">Optional LDAP filter to apply to the search.</param>
+            /// <param name="Properties">Optional list of properties to retrieve from the DomainObject.
+            /// If not specified, all properties are included.</param>
+            /// <param name="UACFilter">Optional filter to parse the userAccountControl DomainObject property.</param>
+            /// <param name="SPN">Optionally filter for only a DomainObject with an SPN set.</param>
+            /// <param name="AllowDelegation">Optionally filter for only a DomainObject that allows for delegation.</param>
+            /// <param name="DisallowDelegation">Optionally filter for only a DomainObject that does not allow for delegation.</param>
+            /// <param name="AdminCount">Optionally filter for only a DomainObject with the AdminCount property set.</param>
+            /// <param name="TrustedToAuth">Optionally filter for only a DomainObject that is trusted to authenticate for other DomainObjects</param>
+            /// <param name="PreauthNotRequired">Optionally filter for only a DomainObject does not require Kerberos preauthentication.</param>
+            /// <returns>Matching user DomainObject</returns>
+            public DomainObject GetDomainUser(string Identity, string LDAPFilter = "", IEnumerable<string> Properties = null, IEnumerable<UACEnum> UACFilter = null, bool SPN = false, bool AllowDelegation = false, bool DisallowDelegation = false, bool AdminCount = false, bool TrustedToAuth = false, bool PreauthNotRequired = false)
             {
-                return this.GetDomainUsers(new List<string> {Identity}, LDAPFilter, Properties, SPN, AllowDelegation,
-                        DisallowDelegation, AdminCount, TrustedToAuth, PreauthNotRequired, SearchScope, UACFilter)
-                    .FirstOrDefault();
+                return this.GetDomainUsers(new List<string> { Identity }, LDAPFilter, Properties, UACFilter, SPN, AllowDelegation, DisallowDelegation, AdminCount, TrustedToAuth, PreauthNotRequired, true).FirstOrDefault();
             }
 
-            public List<DomainObject> GetDomainUsers(IEnumerable<string> Identities = null, string LDAPFilter = "",
-                IEnumerable<string> Properties = null, bool SPN = false, bool AllowDelegation = false,
-                bool DisallowDelegation = false, bool AdminCount = false, bool TrustedToAuth = false,
-                bool PreauthNotRequired = false, int SearchScope = LdapConnection.SCOPE_SUB,
-                IEnumerable<UACEnum> UACFilter = null)
+            /// <summary>
+            /// Gets a list of specified (or all) user `DomainObject`s in the current Domain.
+            /// </summary>
+            /// <param name="Identities">Optional list of usernames to search for.</param>
+            /// <param name="LDAPFilter">Optional LDAP filter to apply to the search.</param>
+            /// <param name="Properties">Optional list of properties to retrieve from the DomainObject.
+            /// If not specified, all properties are included.</param>
+            /// <param name="UACFilter">Optional filter to parse the userAccountControl DomainObject property.</param>
+            /// <param name="SPN">Optionally filter for only a DomainObject with an SPN set.</param>
+            /// <param name="AllowDelegation">Optionally filter for only a DomainObject that allows for delegation.</param>
+            /// <param name="DisallowDelegation">Optionally filter for only a DomainObject that does not allow for delegation.</param>
+            /// <param name="AdminCount">Optionally filter for only a DomainObject with the AdminCount property set.</param>
+            /// <param name="TrustedToAuth">Optionally filter for only a DomainObject that is trusted to authenticate for other DomainObjects</param>
+            /// <param name="PreauthNotRequired">Optionally filter for only a DomainObject does not require Kerberos preauthentication.</param>
+            /// <param name="FindOne">Optionally find only the first matching DomainObject.</param>
+            /// <returns>List of matching user DomainObjects</returns>
+            public List<DomainObject> GetDomainUsers(IEnumerable<string> Identities = null, string LDAPFilter = "", IEnumerable<string> Properties = null, IEnumerable<UACEnum> UACFilter = null, bool SPN = false, bool AllowDelegation = false, bool DisallowDelegation = false, bool AdminCount = false, bool TrustedToAuth = false, bool PreauthNotRequired = false, bool FindOne = false)
             {
                 string Filter = "";
-                string IdentityFilter = ConvertIdentitiesToFilter(Identities, DomainObjectType.User,this.Domain);
-                string[] Props = null;
-
+                string IdentityFilter = ConvertIdentitiesToFilter(Identities);
                 if (IdentityFilter != null && IdentityFilter.Trim() != "")
                 {
                     Filter += "(|" + IdentityFilter + ")";
                 }
-
                 if (SPN)
                 {
                     Filter += "(servicePrincipalName=*)";
                 }
-
                 if (AllowDelegation)
                 {
                     Filter += "(!(userAccountControl:1.2.840.113556.1.4.803:=1048574))";
                 }
-
                 if (DisallowDelegation)
                 {
                     Filter += "(userAccountControl:1.2.840.113556.1.4.803:=1048574)";
                 }
-
                 if (AdminCount)
                 {
                     Filter += "(admincount=1)";
                 }
-
                 if (TrustedToAuth)
                 {
                     Filter += "(msds-allowedtodelegateto=*)";
                 }
-
                 if (PreauthNotRequired)
                 {
                     Filter += "(userAccountControl:1.2.840.113556.1.4.803:=4194304)";
                 }
-
-                if (Properties != null)
+                if (UACFilter != null)
                 {
-                    Props = Props.ToArray();
+                    foreach (UACEnum uac in UACFilter)
+                    {
+                        Filter += "(userAccountControl:1.2.840.113556.1.4.803:=" + ((int)uac) + ")";
+                    }
                 }
 
                 Filter += LDAPFilter;
-                //805306368 = All User objects
-                Filter = "(&(sAMAccountType=805306368)" + Filter + ")";
-               
-                Console.WriteLine("Final Filter: {0}", Filter);
-                Console.WriteLine(this.SearchBase);
-                Console.WriteLine(SearchScope);
-                LdapSearchResults lsc = this.Searcher.Search(this.SearchBase, SearchScope, Filter, Props, false);
-                List<DomainObject> results = new List<DomainObject>();
+                this.DirectorySearcher.Filter = "(&(samAccountType=805306368)" + Filter + ")";
 
-
-                while (lsc.HasMore())
+                if (Properties != null)
                 {
-                    try
+                    this.DirectorySearcher.PropertiesToLoad.Clear();
+                    this.DirectorySearcher.PropertiesToLoad.AddRange(Properties.ToArray());
+                }
+                List<SearchResult> results = new List<SearchResult>();
+                try
+                {
+                    if (FindOne)
                     {
-                        results.Add(ConvertLDAPProperty(lsc.Next()));
+                        results.Add(this.DirectorySearcher.FindOne());
                     }
-                    catch
+                    else
                     {
-                        continue;
+                        var collection = this.DirectorySearcher.FindAll();
+                        foreach (SearchResult result in collection)
+                        {
+                            results.Add(result);
+                        }
                     }
                 }
-
-                return results;
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine("Exception: Can't construct Domain Searcher: " + e.Message + e.StackTrace);
+                }
+                return ConvertSearchResultsToDomainObjects(results);
             }
-            
-            public DomainObject GetDomainGroup(string Identity, string LDAPFilter = "", IEnumerable<string> Properties = null, bool AdminCount = false, string GroupScope = "", string GroupProperty = "", int SearchScope = LdapConnection.SCOPE_SUB)
+
+            /// <summary>
+            /// Gets a specified group `DomainObject` in the current Domain.
+            /// </summary>
+            /// <param name="Identity">Group name to search for.</param>
+            /// <param name="LDAPFilter">Optional LDAP filter to apply to the search.</param>
+            /// <param name="Properties">Optional list of properties to retrieve from the DomainObject.
+            /// If not specified, all properties are included.</param>
+            /// <param name="AdminCount">Optionally filter for only a DomainObject with the AdminCount property set.</param>
+            /// <param name="GroupScope">Optionally filter for a GroupScope (DomainLocal, Global, Universal, etc).</param>
+            /// <param name="GroupProperty">Optionally filter for a GroupProperty (Security, Distribution, CreatedBySystem,
+            /// NotCreatedBySystem,etc)</param>
+            /// <returns>Matching group DomainObject</returns>
+            public DomainObject GetDomainGroup(string Identity, string LDAPFilter = "", IEnumerable<string> Properties = null, bool AdminCount = false, string GroupScope = "", string GroupProperty = "")
             {
                 return this.GetDomainGroups(new List<string> { Identity }, LDAPFilter, Properties, AdminCount, GroupScope, GroupProperty, true).FirstOrDefault();
             }
-            
-            public List<DomainObject> GetDomainGroups(IEnumerable<string> Identities = null, string LDAPFilter = "",
-                IEnumerable<string> Properties = null, bool AdminCount = false, string GroupScope = "",
-                string GroupProperty = "", bool FindOne = false, int SearchScope = LdapConnection.SCOPE_SUB)
+
+            /// <summary>
+            /// Gets a list of specified (or all) group `DomainObject`s in the current Domain.
+            /// </summary>
+            /// <param name="Identities">Optional list of group names to search for.</param>
+            /// <param name="LDAPFilter">Optional LDAP filter to apply to the search.</param>
+            /// <param name="Properties">Optional list of properties to retrieve from the DomainObject.
+            /// If not specified, all properties are included.</param>
+            /// <param name="AdminCount">Optionally filter for only a DomainObject with the AdminCount property set.</param>
+            /// <param name="GroupScope">Optionally filter for a GroupScope (DomainLocal, Global, Universal, etc).</param>
+            /// <param name="GroupProperty">Optionally filter for a GroupProperty (Security, Distribution, CreatedBySystem,
+            /// NotCreatedBySystem,etc).</param>
+            /// <param name="FindOne">Optionally find only the first matching DomainObject.</param>
+            /// <returns>List of matching group DomainObjects</returns>
+            public List<DomainObject> GetDomainGroups(IEnumerable<string> Identities = null, string LDAPFilter = "", IEnumerable<string> Properties = null, bool AdminCount = false, string GroupScope = "", string GroupProperty = "", bool FindOne = false)
             {
                 string Filter = "";
-                string IdentityFilter = ConvertIdentitiesToFilter(Identities, DomainObjectType.User, this.Domain);
-                string[] Props = null;
-
+                string IdentityFilter = ConvertIdentitiesToFilter(Identities);
                 if (IdentityFilter != null && IdentityFilter.Trim() != "")
                 {
                     Filter += "(|" + IdentityFilter + ")";
@@ -218,39 +284,82 @@ namespace CoreSploit.Enumeration
                 {
                     Filter += "(!(groupType:1.2.840.113556.1.4.803:=1))";
                 }
-                if (Properties != null)
-                {
-                    Props = Props.ToArray();
-                }
 
                 Filter += LDAPFilter;
-                Filter = "(&(objectCategory=group)" + Filter + ")";
-                Console.WriteLine("Final Filter: {0}", Filter);
-                Console.WriteLine(this.SearchBase);
-                Console.WriteLine(SearchScope);
-                LdapSearchResults lsc = this.Searcher.Search(this.SearchBase, SearchScope, Filter, Props, false);
-                List<DomainObject> results = new List<DomainObject>();
-                while (lsc.HasMore())
+                this.DirectorySearcher.Filter = "(&(objectCategory=group)" + Filter + ")";
+
+                if (Properties != null)
                 {
-                    try
+                    this.DirectorySearcher.PropertiesToLoad.Clear();
+                    this.DirectorySearcher.PropertiesToLoad.AddRange(Properties.ToArray());
+                }
+                List<SearchResult> results = new List<SearchResult>();
+                try
+                {
+                    if (FindOne)
                     {
-                        results.Add(ConvertLDAPProperty(lsc.Next()));
+                        results.Add(this.DirectorySearcher.FindOne());
                     }
-                    catch (Exception e)
+                    else
                     {
-                        continue;
+                        var collection = this.DirectorySearcher.FindAll();
+                        foreach (SearchResult result in collection)
+                        {
+                            results.Add(result);
+                        }
                     }
                 }
-
-                return results;
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine("Exception: Can't construct Domain Searcher: " + e.Message + e.StackTrace);
+                }
+                return ConvertSearchResultsToDomainObjects(results);
             }
 
+            /// <summary>
+            /// Gets a specified computer `DomainObject` in the current Domain.
+            /// </summary>
+            /// <param name="Identity">ComputerName to search for</param>
+            /// <param name="LDAPFilter">Optional LDAP filter to apply to the search.</param>
+            /// <param name="Properties">Optional list of properties to retrieve from the DomainObject.
+            /// If not specified, all properties are included.</param>
+            /// <param name="UACFilter">Optional filter to parse the userAccountControl DomainObject property.</param>
+            /// <param name="Unconstrained">Optionally filter for only a DomainObject that has unconstrained delegation.</param>
+            /// <param name="TrustedToAuth">Optionally filter for only a DomainObject that is trusted to authenticate for other DomainObjects</param>
+            /// <param name="Printers">Optionally return only a DomainObject that is a printer.</param>
+            /// <param name="SPN">Optionally filter for only a DomainObject with an SPN set.</param>
+            /// <param name="OperatingSystem">Optionally filter for only a DomainObject with a specific Operating System, wildcards accepted.</param>
+            /// <param name="ServicePack">Optionally filter for only a DomainObject with a specific service pack, wildcards accepted.</param>
+            /// <param name="SiteName">Optionally filter for only a DomainObject in a specific Domain SiteName, wildcards accepted.</param>
+            /// <param name="Ping">Optional switch, ping the computer to ensure it's up before enumerating.</param>
+            /// <returns>Matching computer DomainObject</returns>
+            public DomainObject GetDomainComputer(string Identity, string LDAPFilter = "", IEnumerable<string> Properties = null, IEnumerable<UACEnum> UACFilter = null, bool Unconstrained = false, bool TrustedToAuth = false, bool Printers = false, string SPN = "", string OperatingSystem = "", string ServicePack = "", string SiteName = "", bool Ping = false)
+            {
+                return this.GetDomainComputers(new List<string> { Identity }, LDAPFilter, Properties, UACFilter, Unconstrained, TrustedToAuth, Printers, SPN, OperatingSystem, ServicePack, SiteName, Ping, true).FirstOrDefault();
+            }
 
-            public List<DomainObject> GetDomainComputers(IEnumerable<string> Identities = null, string LDAPFilter = "", IEnumerable<string> Properties = null, IEnumerable<UACEnum> UACFilter = null, bool Unconstrained = false, bool TrustedToAuth = false, bool Printers = false, string SPN = "", string OperatingSystem = "", string ServicePack = "", string SiteName = "", bool Ping = false, bool FindOne = false, int SearchScope = LdapConnection.SCOPE_SUB)
+            /// <summary>
+            ///  Gets a list of specified (or all) computer `DomainObject`s in the current Domain.
+            /// </summary>
+            /// <param name="Identities">Optional list of ComputerNames to search for.</param>
+            /// <param name="LDAPFilter">Optional LDAP filter to apply to the search.</param>
+            /// <param name="Properties">Optional list of properties to retrieve from the DomainObject.
+            /// If not specified, all properties are included.</param>
+            /// <param name="UACFilter">Optional filter to parse the userAccountControl DomainObject property.</param>
+            /// <param name="Unconstrained">Optionally filter for only a DomainObject that has unconstrained delegation.</param>
+            /// <param name="TrustedToAuth">Optionally filter for only a DomainObject that is trusted to authenticate for other DomainObjects</param>
+            /// <param name="Printers">Optionally return only a DomainObject that is a printer.</param>
+            /// <param name="SPN">Optionally filter for only a DomainObject with an SPN set.</param>
+            /// <param name="OperatingSystem">Optionally filter for only a DomainObject with a specific Operating System, wildcards accepted.</param>
+            /// <param name="ServicePack">Optionally filter for only a DomainObject with a specific service pack, wildcards accepted.</param>
+            /// <param name="SiteName">Optionally filter for only a DomainObject in a specific Domain SiteName, wildcards accepted.</param>
+            /// <param name="Ping">Optional switch, ping the computer to ensure it's up before enumerating.</param>
+            /// <param name="FindOne">Optionally find only the first matching DomainObject.</param>
+            /// <returns>List of matching computer DomainObjects</returns>
+            public List<DomainObject> GetDomainComputers(IEnumerable<string> Identities = null, string LDAPFilter = "", IEnumerable<string> Properties = null, IEnumerable<UACEnum> UACFilter = null, bool Unconstrained = false, bool TrustedToAuth = false, bool Printers = false, string SPN = "", string OperatingSystem = "", string ServicePack = "", string SiteName = "", bool Ping = false, bool FindOne = false)
             {
                 string Filter = "";
                 string IdentityFilter = ConvertIdentitiesToFilter(Identities, DomainObjectType.Computer);
-                string[] Props = null;
                 if (IdentityFilter != null && IdentityFilter.Trim() != "")
                 {
                     Filter += "(|" + IdentityFilter + ")";
@@ -294,206 +403,182 @@ namespace CoreSploit.Enumeration
                     }
                 }
 
-                Filter = "(&(samAccountType=805306369)" + Filter + ")";
-                Console.WriteLine("Final Filter: {0}", Filter);
-                Console.WriteLine(this.SearchBase);
-                Console.WriteLine(SearchScope);
-                LdapSearchResults lsc = this.Searcher.Search(this.SearchBase, SearchScope, Filter, Props, false);
-                List<DomainObject> results = new List<DomainObject>();
-                while (lsc.HasMore())
+                this.DirectorySearcher.Filter = "(&(samAccountType=805306369)" + Filter + ")";
+
+                List<SearchResult> results = new List<SearchResult>();
+                try
                 {
-                    try
+                    if (FindOne)
                     {
-                        results.Add(ConvertLDAPProperty(lsc.Next()));
+                        results.Add(this.DirectorySearcher.FindOne());
                     }
-                    catch (Exception e)
+                    else
                     {
-                        continue;
+                        var collection = this.DirectorySearcher.FindAll();
+                        foreach (SearchResult result in collection)
+                        {
+                            results.Add(result);
+                        }
                     }
                 }
-
-                return results;
-
-
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine("Exception: Can't construct Domain Searcher: " + e.Message + e.StackTrace);
+                }
+                return ConvertSearchResultsToDomainObjects(results);
             }
 
-            private string GetUserDN(string user)
-            {
-                return "DN=" + user + "," + GetBaseDN();
-            }
-     
             private string GetBaseDN()
             {
                 return "DC=" + this.Domain.Replace(".", ",DC=");
             }
 
-            public List<DomainObject> ConvertLdapResultsToDomainObjects(LdapEntry result)
+            private static List<DomainObject> ConvertSearchResultsToDomainObjects(IEnumerable<SearchResult> Results)
             {
-                return null;
+                List<DomainObject> ldaps = new List<DomainObject>();
+                foreach (SearchResult result in Results)
+                {
+                    ldaps.Add(ConvertLDAPProperty(result));
+                }
+                return ldaps;
             }
 
-            public static DomainObject ConvertLDAPProperty(LdapEntry result)
+            private static DomainObject ConvertLDAPProperty(SearchResult Result)
             {
-                DomainObject obj = new DomainObject();
-                LdapAttributeSet attributeSet = result.getAttributeSet();
-                System.Collections.IEnumerator ienum = attributeSet.GetEnumerator();
-                while (ienum.MoveNext())
+                DomainObject ldap = new DomainObject();
+                foreach (string PropertyName in Result.Properties.PropertyNames)
                 {
-                    LdapAttribute attr = (LdapAttribute)ienum.Current;
-                    switch (attr.Name.ToLower())
+                    if (Result.Properties[PropertyName].Count == 0) { continue; }
+                    if (PropertyName == "objectsid")
                     {
-                        case "objectsid":
-                            //Will need to convert this to a string
-                            obj.objectsid = attr.StringValue;
-                            break;
-                        case "sidhistory":
-                            obj.sidhistory = attr.StringValueArray;
-                            break;
-                        case "grouptype":
-                            obj.grouptype = (GroupTypeEnum)Enum.Parse(typeof(GroupTypeEnum), attr.StringValue);
-                            break;
-                        case "samaccounttype":
-                            obj.samaccounttype = (SamAccountTypeEnum)Enum.Parse(typeof(SamAccountTypeEnum), attr.StringValue);
-                            break;
-                        case "objectguid":
-                            //Will need to conver this to a string
-                            obj.objectguid = attr.StringValue;
-                            break;
-                        case "useraccountcontrol":
-                            //convertme
-                            break;
-                        case "ntsecuritydescriptor":
-                            //convertme
-                            break;
-                        case "accountexpires":
-                            if (long.Parse(attr.StringValue) >= DateTime.MaxValue.Ticks)
+                        ldap.objectsid = new SecurityIdentifier((byte[])Result.Properties["objectsid"][0], 0).Value;
+                    }
+                    else if (PropertyName == "sidhistory")
+                    {
+                        List<string> historyListTemp = new List<string>();
+                        foreach (byte[] bytes in Result.Properties["sidhistory"])
+                        {
+                            historyListTemp.Add(new SecurityIdentifier(bytes, 0).Value);
+                        }
+                        ldap.sidhistory = historyListTemp.ToArray();
+                    }
+                    else if (PropertyName == "grouptype")
+                    {
+                        try { ldap.grouptype = (GroupTypeEnum)Enum.Parse(typeof(GroupTypeEnum), Result.Properties["grouptype"][0].ToString()); }
+                        catch (Exception) { }
+                    }
+                    else if (PropertyName == "samaccounttype")
+                    {
+                        try { ldap.samaccounttype = (SamAccountTypeEnum)Enum.Parse(typeof(SamAccountTypeEnum), Result.Properties["samaccounttype"][0].ToString()); }
+                        catch (Exception) { }
+                    }
+                    else if (PropertyName == "objectguid")
+                    {
+                        ldap.objectguid = new Guid((byte[])Result.Properties["objectguid"][0]).ToString();
+                    }
+                    else if (PropertyName == "useraccountcontrol")
+                    {
+                        try { ldap.useraccountcontrol = (UACEnum)Enum.Parse(typeof(UACEnum), Result.Properties["useraccountcontrol"][0].ToString()); }
+                        catch (Exception) { }
+                    }
+                    else if (PropertyName == "ntsecuritydescriptor")
+                    {
+                        var desc = new RawSecurityDescriptor((byte[])Result.Properties["ntsecuritydescriptor"][0], 0);
+                        ldap.Owner = desc.Owner;
+                        ldap.Group = desc.Group;
+                        ldap.DiscretionaryAcl = desc.DiscretionaryAcl;
+                        ldap.SystemAcl = desc.SystemAcl;
+                    }
+                    else if (PropertyName == "accountexpires")
+                    {
+                        if ((long)Result.Properties["accountexpires"][0] >= DateTime.MaxValue.Ticks)
+                        {
+                            ldap.accountexpires = DateTime.MaxValue;
+                        }
+                        try
+                        {
+                            ldap.accountexpires = DateTime.FromFileTime((long)Result.Properties["accountexpires"][0]);
+                        }
+                        catch (ArgumentOutOfRangeException)
+                        {
+                            ldap.accountexpires = DateTime.MaxValue;
+                        }
+                    }
+                    else if (PropertyName == "lastlogon" || PropertyName == "lastlogontimestamp" || PropertyName == "pwdlastset" ||
+                             PropertyName == "lastlogoff" || PropertyName == "badPasswordTime")
+                    {
+                        DateTime dateTime = DateTime.MinValue;
+                        if (Result.Properties[PropertyName][0].GetType().Name == "System.MarshalByRefObject")
+                        {
+                            var comobj = (MarshalByRefObject)Result.Properties[PropertyName][0];
+                            int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
+                            int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
+                            dateTime = DateTime.FromFileTime(int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber));
+                        }
+                        else
+                        {
+                            dateTime = DateTime.FromFileTime((long)Result.Properties[PropertyName][0]);
+                        }
+                        if (PropertyName == "lastlogon") { ldap.lastlogon = dateTime; }
+                        else if (PropertyName == "lastlogontimestamp") { ldap.lastlogontimestamp = dateTime; }
+                        else if (PropertyName == "pwdlastset") { ldap.pwdlastset = dateTime; }
+                        else if (PropertyName == "lastlogoff") { ldap.lastlogoff = dateTime; }
+                        else if (PropertyName == "badPasswordTime") { ldap.badpasswordtime = dateTime; }
+                    }
+                    else
+                    {
+                        string property = "0";
+                        if (Result.Properties[PropertyName][0].GetType().Name == "System.MarshalByRefObject")
+                        {
+                            var comobj = (MarshalByRefObject)Result.Properties[PropertyName][0];
+                            int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
+                            int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
+                            property = int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber).ToString();
+                        }
+                        else if (Result.Properties[PropertyName].Count == 1)
+                        {
+                            property = Result.Properties[PropertyName][0].ToString();
+                        }
+                        else
+                        {
+                            List<string> propertyList = new List<string>();
+                            foreach (object prop in Result.Properties[PropertyName])
                             {
-                                obj.accountexpires = DateTime.MaxValue;
+                                propertyList.Add(prop.ToString());
                             }
-                            try
-                            {
-                                obj.accountexpires = DateTime.FromFileTime(long.Parse(attr.StringValue));
-                            }
-                            catch (ArgumentOutOfRangeException)
-                            {
-                                obj.accountexpires = DateTime.MaxValue;
-                            }
-                            break;
-                        case "lastlogon":
-                            DateTime dateTime = DateTime.MinValue;
-                            //Not sure if this syntax is right.
-                            if (attr.StringValues.GetType().Name == "System.MarshalByRefObject")
-                            {
-                                var comobj = (MarshalByRefObject)attr.StringValues;
-                                int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                dateTime = DateTime.FromFileTime(int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber));
-                            }
-                            else
-                            {
-                                dateTime = DateTime.FromFileTime(long.Parse(attr.StringValue));
-                            }
-                            obj.lastlogon = dateTime;
-                            break;
-                        case "pwdlastset":
-                            if (attr.StringValues.GetType().Name == "System.MarshalByRefObject")
-                            {
-                                var comobj = (MarshalByRefObject)attr.StringValues;
-                                int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                dateTime = DateTime.FromFileTime(int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber));
-                            }
-                            else
-                            {
-                                dateTime = DateTime.FromFileTime(long.Parse(attr.StringValue));
-                            }
-                            obj.pwdlastset = dateTime;
-                            break;
-                        case "lastlogoff":
-                            if (attr.StringValues.GetType().Name == "System.MarshalByRefObject")
-                            {
-                                var comobj = (MarshalByRefObject)attr.StringValues;
-                                int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                dateTime = DateTime.FromFileTime(int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber));
-                            }
-                            else
-                            {
-                                dateTime = DateTime.FromFileTime(long.Parse(attr.StringValue));
-                            }
-                            obj.lastlogoff = dateTime;
-                            break;
-                        case "badpasswordtime":
-                            if (attr.StringValues.GetType().Name == "System.MarshalByRefObject")
-                            {
-                                var comobj = (MarshalByRefObject)attr.StringValues;
-                                int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                dateTime = DateTime.FromFileTime(int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber));
-                            }
-                            else
-                            {
-                                dateTime = DateTime.FromFileTime(long.Parse(attr.StringValue));
-                            }
-                            obj.badpasswordtime = dateTime;
-                            break;
-                        default:
-                            {
-                                string property = "0";
-                                if (attr.StringValue.GetType().Name == "System.MarshalByRefObject")
-                                {
-                                    var comobj = (MarshalByRefObject)attr.StringValues;
-                                    int high = (int)comobj.GetType().InvokeMember("HighPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                    int low = (int)comobj.GetType().InvokeMember("LowPart", System.Reflection.BindingFlags.GetProperty, null, comobj, null);
-                                    property = int.Parse("0x" + high + "" + low, System.Globalization.NumberStyles.HexNumber).ToString();
-                                }
-                                else if (attr.StringValueArray.Length == 1)
-                                {
-                                    property = attr.StringValueArray[0];
-                                }
-                                else
-                                {
-                                    List<string> propertyList = new List<string>();
-                                    foreach (object prop in attr.StringValueArray)
-                                    {
-                                        propertyList.Add(prop.ToString());
-                                    }
-                                    property = String.Join(", ", propertyList.ToArray());
-                                }
-                                string attribName = attr.Name.ToLower();
-                                if (attribName == "samaccountname") { obj.samaccountname = property; }
-                                else if (attribName == "distinguishedname") { obj.distinguishedname = property; }
-                                else if (attribName == "cn") { obj.cn = property; }
-                                else if (attribName == "admincount") { obj.admincount = property; }
-                                else if (attribName == "serviceprincipalname") { obj.serviceprincipalname = property; }
-                                else if (attribName == "name") { obj.name = property; }
-                                else if (attribName == "description") { obj.description = property; }
-                                else if (attribName == "memberof") { obj.memberof = property; }
-                                else if (attribName == "logoncount") { obj.logoncount = property; }
-                                else if (attribName == "badpwdcount") { obj.badpwdcount = property; }
-                                else if (attribName == "whencreated") { obj.whencreated = property; }
-                                else if (attribName == "whenchanged") { obj.whenchanged = property; }
-                                else if (attribName == "codepage") { obj.codepage = property; }
-                                else if (attribName == "objectcategory") { obj.objectcategory = property; }
-                                else if (attribName == "usnchanged") { obj.usnchanged = property; }
-                                else if (attribName == "instancetype") { obj.instancetype = property; }
-                                else if (attribName == "objectclass") { obj.objectclass = property; }
-                                else if (attribName == "iscriticalsystemobject") { obj.iscriticalsystemobject = property; }
-                                else if (attribName == "usncreated") { obj.usncreated = property; }
-                                else if (attribName == "dscorepropagationdata") { obj.dscorepropagationdata = property; }
-                                else if (attribName == "adspath") { obj.adspath = property; }
-                                else if (attribName == "countrycode") { obj.countrycode = property; }
-                                else if (attribName == "primarygroupid") { obj.primarygroupid = property; }
-                                else if (attribName == "msds_supportedencryptiontypes") { obj.msds_supportedencryptiontypes = property; }
-                                else if (attribName == "showinadvancedviewonly") { obj.showinadvancedviewonly = property; }
-                            }
-                            break;
+                            property = String.Join(", ", propertyList.ToArray());
+                        }
+                        if (PropertyName == "samaccountname") { ldap.samaccountname = property; }
+                        else if (PropertyName == "distinguishedname") { ldap.distinguishedname = property; }
+                        else if (PropertyName == "cn") { ldap.cn = property; }
+                        else if (PropertyName == "admincount") { ldap.admincount = property; }
+                        else if (PropertyName == "serviceprincipalname") { ldap.serviceprincipalname = property; }
+                        else if (PropertyName == "name") { ldap.name = property; }
+                        else if (PropertyName == "description") { ldap.description = property; }
+                        else if (PropertyName == "memberof") { ldap.memberof = property; }
+                        else if (PropertyName == "logoncount") { ldap.logoncount = property; }
+                        else if (PropertyName == "badpwdcount") { ldap.badpwdcount = property; }
+                        else if (PropertyName == "whencreated") { ldap.whencreated = property; }
+                        else if (PropertyName == "whenchanged") { ldap.whenchanged = property; }
+                        else if (PropertyName == "codepage") { ldap.codepage = property; }
+                        else if (PropertyName == "objectcategory") { ldap.objectcategory = property; }
+                        else if (PropertyName == "usnchanged") { ldap.usnchanged = property; }
+                        else if (PropertyName == "instancetype") { ldap.instancetype = property; }
+                        else if (PropertyName == "objectclass") { ldap.objectclass = property; }
+                        else if (PropertyName == "iscriticalsystemobject") { ldap.iscriticalsystemobject = property; }
+                        else if (PropertyName == "usncreated") { ldap.usncreated = property; }
+                        else if (PropertyName == "dscorepropagationdata") { ldap.dscorepropagationdata = property; }
+                        else if (PropertyName == "adspath") { ldap.adspath = property; }
+                        else if (PropertyName == "countrycode") { ldap.countrycode = property; }
+                        else if (PropertyName == "primarygroupid") { ldap.primarygroupid = property; }
+                        else if (PropertyName == "msds_supportedencryptiontypes") { ldap.msds_supportedencryptiontypes = property; }
+                        else if (PropertyName == "showinadvancedviewonly") { ldap.showinadvancedviewonly = property; }
                     }
                 }
-                return obj;
+                return ldap;
             }
 
-            private static string ConvertIdentitiesToFilter(IEnumerable<string> Identities, DomainObjectType objectType = DomainObjectType.User, string Domain = "")
+            private static string ConvertIdentitiesToFilter(IEnumerable<string> Identities, DomainObjectType ObjectType = DomainObjectType.User)
             {
                 if (Identities == null) { return ""; }
                 string IdentityFilter = "";
@@ -509,7 +594,7 @@ namespace CoreSploit.Enumeration
                     {
                         IdentityFilter += "(distinguishedname=" + IdentityInstance + ")";
                     }
-                    else if (objectType == DomainObjectType.Computer && IdentityInstance.Contains("."))
+                    else if (ObjectType == DomainObjectType.Computer && IdentityInstance.Contains("."))
                     {
                         IdentityFilter += "(|(name=" + IdentityInstance + ")(dnshostname=" + IdentityInstance + "))";
                     }
@@ -523,41 +608,28 @@ namespace CoreSploit.Enumeration
                         }
                         IdentityFilter += "(objectguid=" + GuidByteString + ")";
                     }
-                    else if (objectType == DomainObjectType.User || objectType == DomainObjectType.Group)
+                    else if (ObjectType == DomainObjectType.User || ObjectType == DomainObjectType.Group)
                     {
                         if (IdentityInstance.Contains("\\"))
                         {
-                            //////////////
-                            //
-                            //
-                            // Need to figure out what this returns
-                            // Is this really even needed? I'll put a temporary translator function here.
-                            // The only thing that really gets used here is the UserName.
-                            //
-                            //
-                            /////////////
-                            string ConvertedIdentityInstance = ConvertADName(IdentityInstance.Replace("\\28", "(").Replace("\\29", ")"), NameType.NT4, Domain);
+                            string ConvertedIdentityInstance = ConvertADName(IdentityInstance.Replace("\\28", "(").Replace("\\29", ")"));
                             if (ConvertedIdentityInstance != null && ConvertedIdentityInstance != "")
                             {
-                                /**
                                 string UserDomain = ConvertedIdentityInstance.Substring(0, ConvertedIdentityInstance.IndexOf("/"));
                                 string UserName = ConvertedIdentityInstance.Substring(0, ConvertedIdentityInstance.IndexOf("/"));
-                                **/
-                                string UserName = ConvertedIdentityInstance.Substring(ConvertedIdentityInstance.IndexOf('/'), ConvertedIdentityInstance.Length);
-
                                 IdentityFilter += "(samAccountName=" + UserName + ")";
                             }
                         }
-                        else if (objectType == DomainObjectType.User)
+                        else if (ObjectType == DomainObjectType.User)
                         {
                             IdentityFilter += "(samAccountName=" + IdentityInstance + ")";
                         }
-                        else if (objectType == DomainObjectType.Group)
+                        else if (ObjectType == DomainObjectType.Group)
                         {
                             IdentityFilter += "(|(samAccountName=" + IdentityInstance + ")(name=" + IdentityInstance + "))";
                         }
                     }
-                    else if (objectType == DomainObjectType.Computer)
+                    else if (ObjectType == DomainObjectType.Computer)
                     {
                         IdentityFilter += "(name=" + IdentityInstance + ")";
                     }
@@ -573,30 +645,42 @@ namespace CoreSploit.Enumeration
                 switch (type)
                 {
                     case NameType.NT4:
-                    {
-                        if (Identity.Contains('@'))
                         {
-                            adname = domain + "\\" + Identity;
+                            if (Identity.Contains('@'))
+                            {
+                                adname = domain + "\\" + Identity;
+                            }
+                            break;
                         }
-                        break;
-                    }
                 }
-                
-                return adname;
-            }
 
-            public void Dispose()
-            {
-                this.Searcher.Disconnect();
+                return adname;
             }
         }
 
+        /// <summary>
+        /// Credential to authenticate to the Domain with a DomainSearcher object.
+        /// </summary>
+        public class Credential
+        {
+            public string UserName { get; set; }
+            public string Password { get; set; }
+            public Credential(string UserName, string Password)
+            {
+                this.UserName = UserName;
+                this.Password = Password;
+            }
 
+            public static Credential EmptyCredential = new Credential("", "");
+        }
 
-#region HelperFuncs
+        public enum DomainObjectType
+        {
+            User,
+            Group,
+            Computer
+        }
 
-        #endregion
-#region enums and objects
         /// <summary>
         /// Generic DomainObject class for LDAP entries in Active Directory.
         /// </summary>
@@ -609,10 +693,11 @@ namespace CoreSploit.Enumeration
             public string objectsid { get; set; }
             public string[] sidhistory { get; set; }
             public GroupTypeEnum grouptype { get; set; }
-            //public SecurityIdentifier Owner { get; set; }
-            //public SecurityIdentifier Group { get; set; }
-            //public RawAcl DiscretionaryAcl { get; set; }
-            //public RawAcl SystemAcl { get; set; }
+            public SecurityIdentifier Owner { get; set; }
+            public SecurityIdentifier Group { get; set; }
+            public RawAcl DiscretionaryAcl { get; set; }
+            public RawAcl SystemAcl { get; set; }
+
             public string admincount { get; set; }
             public string serviceprincipalname { get; set; }
             public string name { get; set; }
@@ -620,14 +705,17 @@ namespace CoreSploit.Enumeration
             public string memberof { get; set; }
             public string logoncount { get; set; }
             public UACEnum useraccountcontrol { get; set; }
+
             public string badpwdcount { get; set; }
             public DateTime badpasswordtime { get; set; }
             public DateTime pwdlastset { get; set; }
             public string whencreated { get; set; }
             public string whenchanged { get; set; }
             public DateTime accountexpires { get; set; }
+
             public DateTime lastlogon { get; set; }
             public DateTime lastlogoff { get; set; }
+
             public string codepage { get; set; }
             public string objectcategory { get; set; }
             public string usnchanged { get; set; }
@@ -654,10 +742,10 @@ namespace CoreSploit.Enumeration
                 if (this.objectsid != null && this.objectsid.Trim() != "") { output += "objectsid: " + this.objectsid + Environment.NewLine; }
                 if (this.sidhistory != null && String.Join(", ", this.sidhistory).Trim() != "") { output += "sidhistory: " + (this.sidhistory == null ? "" : String.Join(", ", this.sidhistory)) + Environment.NewLine; }
                 if (this.grouptype.ToString().Trim() != "") { output += "grouptype: " + this.grouptype + Environment.NewLine; }
-                //if (this.Owner != null && this.Owner.ToString().Trim() != "") { output += "Owner: " + this.Owner + Environment.NewLine; }
-                //if (this.Group != null && this.Group.ToString().Trim() != "") { output += "Group: " + this.Group + Environment.NewLine; }
-                //if (this.DiscretionaryAcl != null && this.DiscretionaryAcl.ToString().Trim() != "") { output += "DiscretionaryAcl: " + this.DiscretionaryAcl + Environment.NewLine; }
-                //if (this.SystemAcl != null && this.SystemAcl.ToString().Trim() != "") { output += "SystemAcl: " + this.SystemAcl + Environment.NewLine; }
+                if (this.Owner != null && this.Owner.ToString().Trim() != "") { output += "Owner: " + this.Owner + Environment.NewLine; }
+                if (this.Group != null && this.Group.ToString().Trim() != "") { output += "Group: " + this.Group + Environment.NewLine; }
+                if (this.DiscretionaryAcl != null && this.DiscretionaryAcl.ToString().Trim() != "") { output += "DiscretionaryAcl: " + this.DiscretionaryAcl + Environment.NewLine; }
+                if (this.SystemAcl != null && this.SystemAcl.ToString().Trim() != "") { output += "SystemAcl: " + this.SystemAcl + Environment.NewLine; }
                 if (this.admincount != null && this.admincount.Trim() != "") { output += "admincount: " + this.admincount + Environment.NewLine; }
                 if (this.serviceprincipalname != null && this.serviceprincipalname.Trim() != "") { output += "serviceprincipalname: " + this.serviceprincipalname + Environment.NewLine; }
                 if (this.name != null && this.name.Trim() != "") { output += "name: " + this.name + Environment.NewLine; }
@@ -692,6 +780,85 @@ namespace CoreSploit.Enumeration
                 return output;
             }
         }
+
+        /// <summary>
+        /// SPNTicket for a DomainObject with a SPN set. Useful for obtaining krb5tgs hashes.
+        /// </summary>
+        public class SPNTicket
+        {
+            public string ServicePrincipleName { get; set; }
+            public string SamAccountName { get; set; }
+            public string UserDomain { get; set; }
+            public string TicketByteHexStream { get; set; } = null;
+            public string Hash { get; set; } = null;
+
+            /// <summary>
+            /// Constructor for SPNTicket.
+            /// </summary>
+            /// <param name="servicePrincipalName">Service Principal Name (SPN) for which the ticket applies.</param>
+            /// <param name="samAccountName">SamAccountName for the user that has a SPN set.</param>
+            /// <param name="userDomain">Domain name for the user that has a SPN set.</param>
+            /// <param name="ticketHexStream">TicketHexStream of the SPNTicket.</param>
+            public SPNTicket(string servicePrincipalName, string samAccountName, string userDomain, string ticketHexStream)
+            {
+                this.ServicePrincipleName = servicePrincipalName;
+                this.SamAccountName = samAccountName;
+                this.UserDomain = userDomain;
+                this.TicketByteHexStream = ticketHexStream;
+                var matches = Regex.Match(ticketHexStream, "a382....3082....A0030201(?<EtypeLen>..)A1.{1,4}.......A282(?<CipherTextLen>....)........(?<DataToEnd>.+)", RegexOptions.IgnoreCase);
+                if (matches.Success)
+                {
+                    byte etype = Convert.ToByte(matches.Groups["EtypeLen"].Value, 16);
+                    int cipherTextLen = Convert.ToInt32(matches.Groups["CipherTextLen"].Value, 16) - 4;
+                    string cipherText = matches.Groups["DataToEnd"].Value.Substring(0, cipherTextLen * 2);
+
+                    if (matches.Groups["DataToEnd"].Value.Substring(cipherTextLen * 2, 4) == "A482")
+                    {
+                        this.Hash = cipherText.Substring(0, 32) + "$" + cipherText.Substring(32);
+                    }
+                }
+            }
+            public enum HashFormat
+            {
+                Hashcat,
+                John
+            }
+
+            /// <summary>
+            /// Gets a krb5tgs hash formatted for a cracker.
+            /// </summary>
+            /// <param name="format">Format for the hash.</param>
+            /// <returns>Formatted krb5tgs hash.</returns>
+            public string GetFormattedHash(HashFormat format = HashFormat.Hashcat)
+            {
+                if (format == HashFormat.Hashcat)
+                {
+                    return "$krb5tgs$" + "23" + "$*" + this.SamAccountName + "$" + this.UserDomain + "$" + this.ServicePrincipleName + "$" + this.Hash;
+                }
+                else if (format == HashFormat.John)
+                {
+                    return "$krb5tgs$" + this.ServicePrincipleName + ":" + this.Hash;
+                }
+                return null;
+            }
+        }
+
+        public enum NameType
+        {
+            DN = 1,
+            Canonical = 2,
+            NT4 = 3,
+            Display = 4,
+            DomainSimple = 5,
+            EnterpriseSimple = 6,
+            GUID = 7,
+            Unknown = 8,
+            UPN = 9,
+            CanonicalEx = 10,
+            SPN = 11,
+            SID = 12
+        }
+
         public enum SamAccountTypeEnum : uint
         {
             DOMAIN_OBJECT = 0x00000000,
@@ -706,8 +873,9 @@ namespace CoreSploit.Enumeration
             APP_QUERY_GROUP = 0x40000001,
             ACCOUNT_TYPE_MAX = 0x7fffffff
         }
+
         [Flags]
-        public enum GroupTypeEnum : long
+        public enum GroupTypeEnum : uint
         {
             CREATED_BY_SYSTEM = 0x00000001,
             GLOBAL_SCOPE = 0x00000002,
@@ -744,30 +912,5 @@ namespace CoreSploit.Enumeration
             TRUSTED_TO_AUTH_FOR_DELEGATION = 16777216,
             PARTIAL_SECRETS_ACCOUNT = 67108864
         }
-
-        public enum DomainObjectType
-        {
-            User,
-            Group,
-            Computer
-        }
-
-        public enum NameType
-        {
-            DN = 1,
-            Canonical = 2,
-            NT4 = 3,
-            Display = 4,
-            DomainSimple = 5,
-            EnterpriseSimple = 6,
-            GUID = 7,
-            Unknown = 8,
-            UPN = 9,
-            CanonicalEx = 10,
-            SPN = 11,
-            SID = 12
-        }
     }
-#endregion 
-
 }

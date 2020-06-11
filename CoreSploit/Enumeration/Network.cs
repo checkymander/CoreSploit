@@ -99,7 +99,7 @@ namespace CoreSploit.Enumeration
                         PortScanResult portScanResult = new PortScanResult(ComputerName, Port, true);
                         while (runningThreads >= Threads)
                         {
-#warning this may not work properly -scottie
+                            #warning this may not work properly -scottie
                             waiter.Wait();
                             runningThreads--;
                         }
