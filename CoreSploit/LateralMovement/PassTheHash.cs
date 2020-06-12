@@ -51,7 +51,7 @@ namespace CoreSploit.LateralMovement
         /// <returns>Returns a string containing execution results.</returns>
         /// <author>Scottie Austin (@checkymander)</author>
         /// <remarks>
-        /// Based Heavily on Kevin Robertsons Invoke-TheHash toolset (Found
+        /// Ported from Kevin Robertsons Invoke-TheHash toolset (Found
         /// at https://github.com/Kevin-Robertson/Invoke-TheHash)
         /// </remarks>
         public static string WMIExecute(string username, string hash, string domain, List<string> targets, string command = "", int sleep = 15, bool AdminCheck = false, bool debug = false)
@@ -79,7 +79,7 @@ namespace CoreSploit.LateralMovement
         /// <returns>Returns a string containing execution results.</returns>
         /// <author>Scottie Austin (@checkymander)</author>
         /// <remarks>
-        /// Based Heavily on Kevin Robertsons Invoke-TheHash toolset (Found
+        /// Ported from Kevin Robertsons Invoke-TheHash toolset (Found
         /// at https://github.com/Kevin-Robertson/Invoke-TheHash)
         /// </remarks>
         public static string WMIExecute(string username, string hash, string domain, string Target, string command = "", int sleep = 15, bool AdminCheck = false, bool debug = false)
@@ -993,7 +993,7 @@ namespace CoreSploit.LateralMovement
         /// <returns>Returns a string containing execution results.</returns>
         /// <author>Scottie Austin (@checkymander)</author>
         /// <remarks>
-        /// Based Heavily on Kevin Robertsons Invoke-TheHash toolset (Found
+        /// Ported from Kevin Robertsons Invoke-TheHash toolset (Found
         /// at https://github.com/Kevin-Robertson/Invoke-TheHash)
         /// </remarks>
         public static string SMBExecute(string username, string hash, string domain, List<string> targets, string command = "", int sleep = 15, string ServiceName = "", bool AdminCheck = false, bool ComSpec = true, bool ForceSMB1 = false, bool debug = false)
@@ -1024,7 +1024,7 @@ namespace CoreSploit.LateralMovement
         /// <returns>Returns a string containing execution results.</returns>
         /// <author>Scottie Austin (@checkymander)</author>
         /// <remarks>
-        /// Based Heavily on Kevin Robertsons Invoke-TheHash toolset (Found
+        /// Ported from Kevin Robertsons Invoke-TheHash toolset (Found
         /// at https://github.com/Kevin-Robertson/Invoke-TheHash)
         /// </remarks>
         public static string SMBExecute(string username, string hash, string domain, string Target, string command = "", int sleep = 15, string ServiceName = "", bool AdminCheck = false, bool ComSpec = true, bool ForceSMB1 = false, bool debug = false)

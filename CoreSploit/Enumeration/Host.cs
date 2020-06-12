@@ -322,7 +322,12 @@ namespace CoreSploit.Enumeration
         {
             ComputerNames = ComputerNames.Where(CN => CN != null);
             List<LocalGroup> localGroups = new List<LocalGroup>();
-            
+
+
+
+
+            //Old Code Let's see if we can update it.
+            /**
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
                 foreach (string ComputerName in ComputerNames)
@@ -344,8 +349,12 @@ namespace CoreSploit.Enumeration
                     }
                 }
                 return localGroups;
-                
-            }
+               **/
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                string c = "root";
+                Linux.getgrouplist(c, 0, 0, 0);
+            }   
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 foreach (string ComputerName in ComputerNames)

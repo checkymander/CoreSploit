@@ -3,14 +3,14 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net5.0</TargetFramework>
-
+    <LangVersion>preview</LangVersion>
     <ApplicationIcon />
     <StartupObject />
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="System.DirectoryServices" Version="4.7.0" />
-    <PackageReference Include="System.DirectoryServices.Protocols" Version="4.7.0" />
+    <PackageReference Include="System.DirectoryServices.Protocols" Version="5.0.0-preview.5.20278.1" />
     <PackageReference Include="System.Security.AccessControl" Version="4.7.0" />
   </ItemGroup>
 
