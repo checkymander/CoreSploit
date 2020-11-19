@@ -831,47 +831,13 @@ namespace CoreSploit.Enumeration
         {
             public string UserName { get; set; }
             public string Password { get; set; }
-            public string Domain { get; set; }
-            public Credential(string UserName, string Password, string Domain)
+            public Credential(string UserName, string Password)
             {
                 this.UserName = UserName;
                 this.Password = Password;
-                this.Domain = Domain;
             }
 
-            public static Credential EmptyCredential = new Credential("", "", "");
-
-            public bool AreValid()
-            {
-                int ERROR_LOGON_FAILURE = 0x31;
-                int LDAP_SERVER_UNAVAILABLE = 0x51;
-                NetworkCredential credentials = new NetworkCredential(this.UserName, this.Password, this.Domain);
-
-                LdapDirectoryIdentifier id = new LdapDirectoryIdentifier(this.Domain);
-
-                using (LdapConnection connection = new LdapConnection(id, credentials, AuthType.Kerberos))
-                {
-                    connection.SessionOptions.Sealing = true;
-                    connection.SessionOptions.Signing = true;
-
-                    try
-                    {
-                        connection.Bind();
-                    }
-                    catch (LdapException e)
-                    {
-                        if (e.ErrorCode == ERROR_LOGON_FAILURE)
-                        {
-                            return false;
-                        }
-                        else if (e.ErrorCode == LDAP_SERVER_UNAVAILABLE)
-                        {
-                            return false;
-                        }
-                    }
-                    return true;
-                }
-            }
+            public static Credential EmptyCredential = new Credential("", "");
         }
 
         public class SPNTicket
