@@ -1,7 +1,7 @@
 # CoreSploit
 A Post-Exploitation Framework written for .NET 5.0 (Previously known as .NET Core)
 
-Following in the naming of the *Sploit projects, CoreSploit is designed to work with Cross-Platform agents that are made using the .NET Framework 5.0 and above.
+Following in the naming of the various *sploit projects, CoreSploit is designed to work with cross-platform agents that are made using the .NET Framework 5.0 and above.
 
 # Supported Functionality and Namespaces
 
