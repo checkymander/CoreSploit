@@ -39,9 +39,9 @@ Ping - Check if a host is up
 ## Coresploit.LateralMovement
 ```
 SMBAdminCheck - Using PassTheHash and SMB to check if a user is admin
-SMBExecute
-WMIAdminCheck
-WMIExecute
+SMBExecute - Using PassTheHash and SMB to execute a command
+WMIAdminCheck- Using PassTheHash and WMI to check if a user is admin
+WMIExecute- Using PassTheHash and WMI to execute a command
 ```
 
 # Credits
