@@ -7,6 +7,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 using CoreSploit.Generic;
 using CoreSploit.Execution;
+using System.Drawing;
 
 namespace CoreSploit.Enumeration
 {
@@ -138,7 +139,21 @@ namespace CoreSploit.Enumeration
             return Environment.UserDomainName + "\\" + Environment.UserName;
         }
 
-
+        public static byte[] TakeScreenshot(int width, int height)
+        {
+            //ex.) 1920 x 1080
+            using var bitmap = new Bitmap(width, height);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.CopyFromScreen(0, 0, 0, 0,
+                bitmap.Size, CopyPixelOperation.SourceCopy);
+            }
+            using (var stream = new MemoryStream())
+            {
+                bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Jpeg);
+                return stream.ToArray();
+            }
+        }
 
         public sealed class ProcessResult : CoreSploitResult
         {

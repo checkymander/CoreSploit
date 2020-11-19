@@ -4,6 +4,7 @@ using System.Text;
 
 namespace CoreSploit.Execution
 {
+    //PlaceHolder for future OSX Execution Methods
     class OSX
     {
     }
