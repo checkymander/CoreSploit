@@ -40,13 +40,14 @@ namespace CoreSploit.Enumeration
                 }
                 catch { }
                 
-                
                 var processName = process.ProcessName;
                 var processPath = "";
 
                 try
                 {
-                    processPath = process.MainModule?.FileName;
+                    var path = process.MainModule?.FileName;
+                    if (!string.IsNullOrEmpty(path)) // apparently this can be null on macOS at least...
+                        processPath = path;
                 }
                 catch { }
                 
