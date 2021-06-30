@@ -5,6 +5,8 @@ VisualStudioVersion = 16.0.29503.13
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CoreSploit", "CoreSploit\CoreSploit.csproj", "{928BE96F-507F-4683-A105-D07B9CEEE15E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CoreSploit.Tests", "CoreSploit.Tests\CoreSploit.Tests.csproj", "{812F506D-C66B-4BAD-8915-6159C8A77668}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{928BE96F-507F-4683-A105-D07B9CEEE15E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{928BE96F-507F-4683-A105-D07B9CEEE15E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{928BE96F-507F-4683-A105-D07B9CEEE15E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{812F506D-C66B-4BAD-8915-6159C8A77668}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{812F506D-C66B-4BAD-8915-6159C8A77668}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{812F506D-C66B-4BAD-8915-6159C8A77668}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{812F506D-C66B-4BAD-8915-6159C8A77668}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

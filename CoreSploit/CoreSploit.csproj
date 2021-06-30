@@ -3,9 +3,22 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net5.0</TargetFramework>
-    <LangVersion>preview</LangVersion>
+    <LangVersion>9</LangVersion>
     <ApplicationIcon />
     <StartupObject />
+    <Windows Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))' == 'true'">true</Windows>
+    <OSX Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))' == 'true'">true</OSX>
+    <Linux Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))' == 'true'">true</Linux>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Windows)'=='true'">
+    <DefineConstants>Windows</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OSX)'=='true'">
+    <DefineConstants>OSX</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Linux)'=='true'">
+    <DefineConstants>Linux</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

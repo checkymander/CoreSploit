@@ -1,13 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Runtime.InteropServices;
+using System.Drawing;
+using System.Security.Principal;
+
 using CoreSploit.Generic;
 using CoreSploit.Execution;
-using System.Drawing;
+
+using PInvoke = CoreSploit.Execution.PlatformInvoke;
 
 namespace CoreSploit.Enumeration
 {
@@ -19,75 +23,110 @@ namespace CoreSploit.Enumeration
         /// <returns>List of ProcessResults.</returns>
         public static CoreSploitResultList<ProcessResult> GetProcessList()
         {
-            Platform processorArchitecture = Platform.Unknown;
-            if (System.Environment.Is64BitOperatingSystem)
-            {
-                processorArchitecture = Platform.x64;
-            }
-            else
-            {
-                processorArchitecture = Platform.x86;
-            }
-            Process[] processes = Process.GetProcesses().OrderBy(P => P.Id).ToArray();
-            CoreSploitResultList<ProcessResult> results = new CoreSploitResultList<ProcessResult>();
-            foreach (Process process in processes)
-            {
-                int processId = process.Id;
-                int parentProcessId = 0;
-                string processName = process.ProcessName;
-                string processPath = string.Empty;
-                int sessionId = process.SessionId;
-                //string processOwner = GetProcessOwner(process);
-                Platform processArch = Platform.Unknown;
+            var processes = Process.GetProcesses()
+                .OrderBy(p => p.Id)
+                .ToArray();
+            
+            var results = new CoreSploitResultList<ProcessResult>();
 
-                if (parentProcessId != 0)
+            foreach (var process in processes)
+            {
+                var processId = process.Id;
+                var parentProcessId = 0;
+                
+                try
                 {
-                    try
-                    {
-                        processPath = process.MainModule.FileName;
-                    }
-                    catch (System.ComponentModel.Win32Exception) { }
+                    parentProcessId = GetParentProcess(process.Handle);
                 }
-                /**
-                if (processorArchitecture == Platform.x64)
+                catch { }
+                
+                
+                var processName = process.ProcessName;
+                var processPath = "";
+
+                try
                 {
-                    processArch = IsWow64(process) ? Win32.Kernel32.Platform.x86 : Win32.Kernel32.Platform.x64;
+                    processPath = process.MainModule?.FileName;
                 }
-                else if (processorArchitecture == Win32.Kernel32.Platform.x86)
-                {
-                    processArch = Win32.Kernel32.Platform.x86;
-                }
-                else if (processorArchitecture == Win32.Kernel32.Platform.IA64)
-                {
-                    processArch = "x86";
-                }
-                **/
+                catch { }
+                
+                var sessionId = process.SessionId;
+                var processOwner = GetProcessOwner(process);
+                var processArch = RuntimeInformation.ProcessArchitecture;
+
                 results.Add(new ProcessResult
                 {
                     Pid = processId,
                     Ppid = parentProcessId,
                     Name = processName,
                     Path = processPath,
-                    SessionID = sessionId,
-                    //Owner = processOwner,
-                    //Architecture = processArch
+                    SessionId = sessionId,
+                    Owner = processOwner,
+                    Architecture = processArch
                 });
             }
+
             return results;
         }
 
+        /// <summary>
+        /// Gets the parent process id of a process handle
+        /// </summary>
+        /// <author>Daniel Duggan (@_RastaMouse)</author>
+        /// <param name="hProcess">Handle to the process to get the parent process id of</param>
+        /// <returns>Parent Process Id</returns>
+        private static int GetParentProcess(IntPtr hProcess)
+        {
+#if Windows
+            var bpi = new Native.PROCESS_BASIC_INFORMATION();
+            var pProcInfo = Marshal.AllocHGlobal(Marshal.SizeOf(bpi));
+            Marshal.StructureToPtr(bpi, pProcInfo, true);
+            PInvoke.Native.NtQueryInformationProcess(hProcess, Native.PROCESSINFOCLASS.ProcessBasicInformation, pProcInfo, Marshal.SizeOf(bpi), out _);
+            bpi = (Native.PROCESS_BASIC_INFORMATION) Marshal.PtrToStructure(pProcInfo, typeof(Native.PROCESS_BASIC_INFORMATION));
 
+            return bpi.InheritedFromUniqueProcessId;
+#endif
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Gets the username of the owner of a process
+        /// </summary>
+        /// <author>Daniel Duggan (@_RastaMouse)</author>
+        /// <param name="process">Process to get owner of</param>
+        /// <returns>Username of process owner. Returns empty string if unsuccessful.</returns>
+        public static string GetProcessOwner(Process process)
+        {
+            #if Windows
+            try
+            {
+                PInvoke.Win32.Kernel32.OpenProcessToken(process.Handle, 8, out var handle);
+                using var winIdentity = new WindowsIdentity(handle);
+                return winIdentity.Name;
+            }
+            catch
+            {
+                // ignore, probably access denied
+            }
+            #endif
+
+            return string.Empty;
+        }
+        
         /// <summary>
         /// Gets a directory listing of a directory.
         /// </summary>
-        /// <param name="Path">The path of the directory to get a listing of.</param>
+        /// <param name="path">The path of the directory to get a listing of.</param>
         /// <returns>CoreSploitResultList of FileSystemEntryResults.</returns>
-        public static CoreSploitResultList<FileSystemEntryResult> GetDirectoryListing(string Path)
+        public static CoreSploitResultList<FileSystemEntryResult> GetDirectoryListing(string path)
         {
-            CoreSploitResultList<FileSystemEntryResult> results = new CoreSploitResultList<FileSystemEntryResult>();
-            foreach (string dir in Directory.GetDirectories(Path))
+            var results = new CoreSploitResultList<FileSystemEntryResult>();
+            
+            foreach (var dir in Directory.GetDirectories(path))
             {
-                DirectoryInfo dirInfo = new DirectoryInfo(dir);
+                var dirInfo = new DirectoryInfo(dir);
+                
                 results.Add(new FileSystemEntryResult
                 {
                     Name = dirInfo.FullName,
@@ -97,9 +136,11 @@ namespace CoreSploit.Enumeration
                     LastWriteTimeUtc = dirInfo.LastWriteTimeUtc
                 });
             }
-            foreach (string file in Directory.GetFiles(Path))
+            
+            foreach (var file in Directory.GetFiles(path))
             {
-                FileInfo fileInfo = new FileInfo(file);
+                var fileInfo = new FileInfo(file);
+                
                 results.Add(new FileSystemEntryResult
                 {
                     Name = fileInfo.FullName,
@@ -109,16 +150,17 @@ namespace CoreSploit.Enumeration
                     LastWriteTimeUtc = fileInfo.LastWriteTimeUtc
                 });
             }
+            
             return results;
         }
 
         /// <summary>
         /// Changes the current working directory.
         /// </summary>
-        /// <param name="DirectoryName">Relative or absolute path to new working directory.</param>
-        public static void ChangeCurrentDirectory(string DirectoryName)
+        /// <param name="directoryName">Relative or absolute path to new working directory.</param>
+        public static void ChangeCurrentDirectory(string directoryName)
         {
-            Directory.SetCurrentDirectory(DirectoryName);
+            Directory.SetCurrentDirectory(directoryName);
         }
         
         /// <summary>
@@ -139,6 +181,12 @@ namespace CoreSploit.Enumeration
             return Environment.UserDomainName + "\\" + Environment.UserName;
         }
 
+        /// <summary>
+        /// Take a screenshot of the current desktop
+        /// </summary>
+        /// <param name="width">Width in pixels</param>
+        /// <param name="height">Height in pixels</param>
+        /// <returns></returns>
         public static byte[] TakeScreenshot(int width, int height)
         {
             //ex.) 1920 x 1080
@@ -157,28 +205,25 @@ namespace CoreSploit.Enumeration
 
         public sealed class ProcessResult : CoreSploitResult
         {
-            public int Pid { get; set; } = 0;
-            public int Ppid { get; set; } = 0;
+            public int Pid { get; set; }
+            public int Ppid { get; set; }
             public string Name { get; set; } = "";
             public string Path { get; set; } = "";
-            public int SessionID { get; set; } = 0;
-            //public string Owner { get; set; } = "";
-            //public string Architecture { get; set; } = "unkonwn";
-            protected internal override IList<CoreSploitResultProperty> ResultProperties
-            {
-                get
+            public int SessionId { get; set; }
+            public string Owner { get; set; } = "";
+            public Architecture Architecture { get; set; }
+
+            protected internal override IList<CoreSploitResultProperty> ResultProperties =>
+                new List<CoreSploitResultProperty>
                 {
-                    return new List<CoreSploitResultProperty> {
-                        new CoreSploitResultProperty { Name = "Pid", Value = this.Pid },
-                        new CoreSploitResultProperty { Name = "Ppid", Value = this.Ppid },
-                        new CoreSploitResultProperty { Name = "Name", Value = this.Name },
-                        new CoreSploitResultProperty { Name = "SessionID", Value = this.SessionID },
-                        //new CoreSploitResultProperty { Name = "Owner", Value = this.Owner },
-                        //new CoreSploitResultProperty { Name = "Architecture", Value = this.Architecture },
-                        new CoreSploitResultProperty { Name = "Path", Value = this.Path }
-                    };
-                }
-            }
+                    new() {Name = "Pid", Value = Pid},
+                    new() {Name = "Ppid", Value = Ppid},
+                    new() {Name = "Name", Value = Name},
+                    new() {Name = "SessionID", Value = SessionId},
+                    new() {Name = "Owner", Value = Owner},
+                    new() {Name = "Architecture", Value = Architecture},
+                    new() {Name = "Path", Value = Path}
+                };
         }
 
         /// <summary>
@@ -187,46 +232,23 @@ namespace CoreSploit.Enumeration
         public sealed class FileSystemEntryResult : CoreSploitResult
         {
             public string Name { get; set; } = "";
-            public long Length { get; set; } = 0;
-            public DateTime CreationTimeUtc { get; set; } = new DateTime();
-            public DateTime LastAccessTimeUtc { get; set; } = new DateTime();
-            public DateTime LastWriteTimeUtc { get; set; } = new DateTime();
-            protected internal override IList<CoreSploitResultProperty> ResultProperties
-            {
-                get
+            public long Length { get; set; }
+            public DateTime CreationTimeUtc { get; set; }
+            public DateTime LastAccessTimeUtc { get; set; }
+            public DateTime LastWriteTimeUtc { get; set; }
+
+            protected internal override IList<CoreSploitResultProperty> ResultProperties =>
+                new List<CoreSploitResultProperty>
                 {
-                    return new List<CoreSploitResultProperty>
-                    {
-                        new CoreSploitResultProperty
-                        {
-                            Name = "Name",
-                            Value = this.Name
-                        },
-                        new CoreSploitResultProperty
-                        {
-                            Name = "Length",
-                            Value = this.Length
-                        },
-                        new CoreSploitResultProperty
-                        {
-                            Name = "CreationTimeUtc",
-                            Value = this.CreationTimeUtc
-                        },
-                        new CoreSploitResultProperty
-                        {
-                            Name = "LastAccessTimeUtc",
-                            Value = this.LastAccessTimeUtc
-                        },
-                        new CoreSploitResultProperty
-                        {
-                            Name = "LastWriteTimeUtc",
-                            Value = this.LastWriteTimeUtc
-                        }
-                    };
-                }
-            }
+                    new() {Name = "Name", Value = Name},
+                    new() {Name = "Length", Value = Length},
+                    new() {Name = "CreationTimeUtc", Value = CreationTimeUtc},
+                    new() {Name = "LastAccessTimeUtc", Value = LastAccessTimeUtc},
+                    new() {Name = "LastWriteTimeUtc", Value = LastWriteTimeUtc}
+                };
         }
     }
+    
     /// <summary>
     /// Net is a library for localgroup/domain enumeration that can be used to search for users, groups, loggedonusers,
     /// and sessions on remote systems using Win32 API functions.
@@ -250,7 +272,7 @@ namespace CoreSploit.Enumeration
 
             public override string ToString()
             {
-                string output = "";
+                var output = "";
                 output += "ComputerName: " + ComputerName + Environment.NewLine;
                 output += "GroupName: " + GroupName + Environment.NewLine;
                 output += "Comment: " + Comment + Environment.NewLine;
@@ -272,12 +294,12 @@ namespace CoreSploit.Enumeration
 
             public override string ToString()
             {
-                string output = "";
-                if (this.ComputerName.Trim() != "") { output += "ComputerName: " + ComputerName + Environment.NewLine; }
-                if (this.MemberName.Trim() != "") { output += "MemberName: " + MemberName + Environment.NewLine; }
-                if (this.SID.Trim() != "") { output += "SID: " + SID + Environment.NewLine; }
-                if (this.IsGroup.ToString().Trim() != "") { output += "IsGroup: " + IsGroup + Environment.NewLine; }
-                if (this.IsDomain.ToString().Trim() != "") { output += "IsDomain: " + IsDomain + Environment.NewLine; }
+                var output = "";
+                if (ComputerName.Trim() != "") { output += "ComputerName: " + ComputerName + Environment.NewLine; }
+                if (MemberName.Trim() != "") { output += "MemberName: " + MemberName + Environment.NewLine; }
+                if (SID.Trim() != "") { output += "SID: " + SID + Environment.NewLine; }
+                if (IsGroup.ToString().Trim() != "") { output += "IsGroup: " + IsGroup + Environment.NewLine; }
+                if (IsDomain.ToString().Trim() != "") { output += "IsDomain: " + IsDomain + Environment.NewLine; }
 
                 return output;
             }
@@ -291,7 +313,7 @@ namespace CoreSploit.Enumeration
         /// <returns>List of LocalGroups.</returns>
         public static List<LocalGroup> GetNetLocalGroups(Domain.DomainObject DomainComputer)
         {
-            List<string> ComputerNames = new List<string>();
+            var ComputerNames = new List<string>();
             if (DomainComputer != null && DomainComputer.samaccounttype == Domain.SamAccountTypeEnum.MACHINE_ACCOUNT)
             {
                 ComputerNames.Add(DomainComputer.cn);
@@ -306,8 +328,8 @@ namespace CoreSploit.Enumeration
         /// <returns>List of LocalGroups.</returns>
         public static List<LocalGroup> GetNetLocalGroups(IEnumerable<Domain.DomainObject> DomainComputers)
         {
-            List<string> ComputerNames = new List<string>();
-            foreach (Domain.DomainObject DomainComputer in DomainComputers)
+            var ComputerNames = new List<string>();
+            foreach (var DomainComputer in DomainComputers)
             {
                 if (DomainComputer != null && DomainComputer.samaccounttype == Domain.SamAccountTypeEnum.MACHINE_ACCOUNT)
                 {
@@ -336,7 +358,7 @@ namespace CoreSploit.Enumeration
         public static List<LocalGroup> GetNetLocalGroups(IEnumerable<string> ComputerNames)
         {
             ComputerNames = ComputerNames.Where(CN => CN != null);
-            List<LocalGroup> localGroups = new List<LocalGroup>();
+            var localGroups = new List<LocalGroup>();
 
 
 
@@ -367,27 +389,27 @@ namespace CoreSploit.Enumeration
                **/
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                string c = "root";
+                var c = "root";
                 Linux.getgrouplist(c, 0, 0, 0);
             }   
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                foreach (string ComputerName in ComputerNames)
+                foreach (var ComputerName in ComputerNames)
                 {
-                    int QueryLevel = 1;
-                    IntPtr PtrInfo = IntPtr.Zero;
-                    int EntriesRead = 0;
-                    int TotalRead = 0;
-                    int ResumeHandle = 0;
-                    int Result = Win32.Netapi32.NetLocalGroupEnum(ComputerName, QueryLevel, out PtrInfo, -1, out EntriesRead, out TotalRead, ref ResumeHandle);
-                    long Offset = PtrInfo.ToInt64();
+                    var QueryLevel = 1;
+                    var PtrInfo = IntPtr.Zero;
+                    var EntriesRead = 0;
+                    var TotalRead = 0;
+                    var ResumeHandle = 0;
+                    var Result = Win32.Netapi32.NetLocalGroupEnum(ComputerName, QueryLevel, out PtrInfo, -1, out EntriesRead, out TotalRead, ref ResumeHandle);
+                    var Offset = PtrInfo.ToInt64();
                     if (Result == 0 && Offset > 0)
                     {
-                        int increment = Marshal.SizeOf(typeof(Win32.Netapi32.LOCALGROUP_USERS_INFO_1));
-                        for (int i = 0; i < EntriesRead; i++)
+                        var increment = Marshal.SizeOf(typeof(Win32.Netapi32.LOCALGROUP_USERS_INFO_1));
+                        for (var i = 0; i < EntriesRead; i++)
                         {
-                            IntPtr NextIntPtr = new IntPtr(Offset);
-                            Win32.Netapi32.LOCALGROUP_USERS_INFO_1 Info = (Win32.Netapi32.LOCALGROUP_USERS_INFO_1)Marshal.PtrToStructure(NextIntPtr, typeof(Win32.Netapi32.LOCALGROUP_USERS_INFO_1));
+                            var NextIntPtr = new IntPtr(Offset);
+                            var Info = (Win32.Netapi32.LOCALGROUP_USERS_INFO_1)Marshal.PtrToStructure(NextIntPtr, typeof(Win32.Netapi32.LOCALGROUP_USERS_INFO_1));
                             Offset = NextIntPtr.ToInt64();
                             Offset += increment;
                             localGroups.Add(
@@ -403,7 +425,7 @@ namespace CoreSploit.Enumeration
                     }
                     else
                     {
-                        Console.Error.WriteLine("Error: " + new System.ComponentModel.Win32Exception(Result).Message);
+                        Console.Error.WriteLine("Error: " + new Win32Exception(Result).Message);
                     }
                 }
                 return localGroups;
